@@ -10,6 +10,7 @@ import torch
 from renderer_ogl import GaussianRenderBase
 from dataclasses import dataclass
 from cuda import cudart as cu
+# from gsplat import rasterization
 # from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
 
@@ -249,6 +250,35 @@ class CUDARenderer(GaussianRenderBase):
                 rotations = self.gaussians.rot,
                 cov3D_precomp = None
             )
+
+        # focal_length_x = self.raster_settings["image_width"] / (2 * self.raster_settings["tanfovx"])
+        # focal_length_y = self.raster_settings["image_height"] / (2 * self.raster_settings["tanfovy"])
+        
+        # K = torch.tensor(
+        #     [
+        #         [focal_length_x, 0, self.raster_settings["image_width"] / 2.0],
+        #         [0, focal_length_y, self.raster_settings["image_height"] / 2.0],
+        #         [0, 0, 1],
+        #     ],
+        #     device="cuda",
+        # )
+
+        # with torch.no_grad():
+        #     render_colors, render_alphas, info = rasterization(
+        #         means=self.gaussians.xyz,                         # [N, 3]
+        #         quats=self.gaussians.rot,                         # [N, 4]
+        #         scales=self.gaussians.scale,                      # [N, 3]
+        #         opacities=self.gaussians.opacity.squeeze(-1),     # [N,]
+        #         colors=self.gaussians.sh,               # [N, 3] or SH-based colors
+        #         viewmats=self.raster_settings["viewmatrix"][None],                 # [1, 4, 4]
+        #         Ks=K[None],                             # [1, 3, 3]
+        #         backgrounds=self.raster_settings["bg"][None],             # [1, 3]
+        #         width=int(self.raster_settings["image_width"]),
+        #         height=int(self.raster_settings["image_height"]),
+        #         packed=False,
+        #         sh_degree=self.raster_settings["sh_degree"]             # e.g., 0 for RGB, or 3+ for spherical harmonics
+        #     )
+        # img = render_colors[0].permute(2, 0, 1)
 
         img = img.permute(1, 2, 0)
         img = torch.concat([img, torch.ones_like(img[..., :1])], dim=-1)

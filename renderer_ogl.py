@@ -177,6 +177,7 @@ class OpenGLRenderer(GaussianRenderBase):
                                                             buffer_id=self.gau_bufferid)
         else:
             self.gau_bufferid = metadata
+            util.bind_storage_buffer(0, metadata)
         util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
 
     def sort_and_update(self, camera: util.Camera):

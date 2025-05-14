@@ -229,6 +229,9 @@ def set_storage_buffer_data(program, key, value: np.ndarray, bind_idx, vao=None,
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
     return buffer_id
 
+def bind_storage_buffer(bind_idx, buffer_id):
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, bind_idx, buffer_id)
+
 def set_faces_tovao(vao, faces: np.ndarray):
     # faces
     glBindVertexArray(vao)

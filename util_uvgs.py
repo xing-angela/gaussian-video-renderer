@@ -5,6 +5,8 @@ import util_gau
 import collections
 import numpy as np
 from renderer_cuda import gaus_cuda_from_cpu
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 
 class GaussianVideo:
@@ -21,12 +23,14 @@ class GaussianVideo:
         self.gaussian_cache = np.array([None] * fps) # opengl buffer ids or cuda gaussians
         self.renderer_type = renderer_type # opengl = 0, cuda = 1
         self.program = None
-        self.frame_step_size = 10
+        self.frame_step_size = 1
+        self.prev_frame_idx = 0
 
     def load_frames(self, folder_path):
-        if (folder_path is None or folder_path == ''):
+        if not folder_path:
             self.num_frames = 0
-            return []
+            self.frames = []
+            return
 
         frame_files = sorted([
             os.path.join(folder_path, f)
@@ -35,26 +39,30 @@ class GaussianVideo:
         ])
         self.num_frames = len(frame_files)
 
-        return [util_gau.load_ply(p) for p in frame_files]
+        with ThreadPoolExecutor() as executor:
+            self.frames = list(tqdm(executor.map(util_gau.load_ply, frame_files), total=len(frame_files)))
 
     def upload_to_gpu(self, idx):
         cache_idx = idx % len(self.gaussian_cache)
+        print("uploading frame " + str(idx) + " to cache idx " + str(cache_idx))
         gaus = self.frames[idx]
         gpu_data = None
-        if self.gaussian_cache[cache_idx] is None or self.gaussian_cache[cache_idx][1] != idx:
+        prev_entry = self.gaussian_cache[cache_idx]
+        if prev_entry is None or prev_entry[1] != idx:
             if (self.renderer_type == 0):
-                assert(self.program != None)
+                assert self.program != None
                 gaussian_data = gaus.flat()
+                buffer_id = prev_entry[0] if prev_entry is not None else None
                 buffer_id = util.set_storage_buffer_data(
                     self.program, "gaussian_data", gaussian_data,
-                    bind_idx=0, buffer_id=cache_idx+1
+                    bind_idx=0, buffer_id=buffer_id
                 )
                 gpu_data = buffer_id
             elif (self.renderer_type == 1):
                 gpu_data = gaus_cuda_from_cpu(gaus)
             self.gaussian_cache[cache_idx] = (gpu_data, idx)
 
-        return gpu_data
+        return (gpu_data, idx)
 
     def upload_frames_to_gpu(self, indices):
         if len(indices) > len(self.gaussian_cache):
@@ -98,8 +106,8 @@ class GaussianVideo:
             cache_entry = self.upload_to_gpu(self.current_frame_idx)
         else:
             cache_entry = self.gaussian_cache[self.current_frame_idx % len(self.gaussian_cache)]
-            assert(cache_entry is not None, "cached frame is None")
-            assert(self.current_frame_idx == cache_entry[1], "cached frame is different from current frame")
+            assert cache_entry is not None, "cached frame is None"
+            assert self.current_frame_idx == cache_entry[1], "cached frame is different from current frame"
 
         return cache_entry[0]
 
@@ -129,3 +137,7 @@ class GaussianVideo:
 
     def set_program(self, program):
         self.program = program
+
+    def get_total_frame_memory_gb(self):
+        total_bytes = sum(frame.flat().nbytes for frame in self.frames)
+        return total_bytes / (1024 ** 3)    

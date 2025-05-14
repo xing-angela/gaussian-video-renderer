@@ -1,3 +1,5 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 import glfw
 import OpenGL.GL as gl
 from imgui.integrations.glfw import GlfwRenderer
@@ -9,7 +11,6 @@ import util_gau
 import tkinter as tk
 from util_uvgs import GaussianVideo
 from tkinter import filedialog
-import os
 import sys
 import argparse
 from renderer_ogl import OpenGLRenderer, GaussianRenderBase
@@ -39,7 +40,7 @@ g_show_camera_win = False
 g_render_mode_tables = ["Gaussian Ball", "Flat Ball", "Billboard", "Depth", "SH:0", "SH:0~1", "SH:0~2", "SH:0~3 (default)"]
 g_render_mode = 7
 
-g_video = GaussianVideo(None, fps=30)
+g_video = GaussianVideo(None, fps=12)
 
 def impl_glfw_init():
     window_name = "NeUVF editor"
@@ -139,6 +140,7 @@ def main():
     g_renderer_list[BACKEND_OGL] = OpenGLRenderer(g_camera.w, g_camera.h)
     try:
         from renderer_cuda import CUDARenderer
+        raise ImportError("Forcing OpenGL")
         g_renderer_list += [CUDARenderer(g_camera.w, g_camera.h)]
     except ImportError:
         g_renderer_idx = BACKEND_OGL
@@ -173,10 +175,18 @@ def main():
             frame_changed = False
             if not g_video.paused:
                 frame_changed = g_video.update() 
+                # print("Frame Changed")
         
             if frame_changed:
                 gaussians = g_video.get_current_frame_cpu()
-                g_renderer.update_gaussian_data(gaussians)
+                # g_renderer.update_gaussian_data(gaussians)
+
+                # debug
+                # g_video.prefetch_frames(len(g_video.frames), load_current=False)
+
+                gaussians_gpu = g_video.get_current_frame_gpu()
+                g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
+
                 g_renderer.sort_and_update(g_camera)
 
         g_renderer.draw()
@@ -197,6 +207,7 @@ def main():
             imgui.end_main_menu_bar()
         
         if g_show_control_win:
+            # Not yet integrated with vid
             if imgui.begin("Control", True):
                 # rendering backend
                 changed, g_renderer_idx = imgui.combo("backend", g_renderer_idx, ["ogl", "cuda"][:len(g_renderer_list)])
@@ -229,9 +240,15 @@ def main():
                     folder_path = filedialog.askdirectory(title="Open Gaussian Video Folder")
                     if folder_path:
                         g_video.load_frames(folder_path)
-                        print("Loaded " + g_video.num_frames + " frames")
-                        assert(g_video.num_frames > 0, "Could not load video frames")
-                
+                        print("Loaded " + str(g_video.num_frames) + " frames")
+                        assert g_video.num_frames > 0, "Could not load video frames"
+                        print("Total size: " + str(g_video.get_total_frame_memory_gb()) + " GB")
+
+                        # test
+                        frames = [i for i in range(g_video.num_frames)]
+                        print(frames)
+                        g_video.upload_frames_to_gpu(frames)
+
                 # camera fov
                 changed, g_camera.fovy = imgui.slider_float(
                     "fov", g_camera.fovy, 0.001, np.pi - 0.001, "fov = %.3f"
@@ -347,19 +364,24 @@ def main():
                 g_video.toggle_pause()
 
             imgui.same_line()
+            changed_frame = False
             if imgui.button("<<"):
                 g_video.step_backward()
-                update_activated_renderer_state(g_video.get_current_frame())
+                changed_frame = True
             imgui.same_line()
             if imgui.button(">>"):
                 g_video.step_forward()
-                update_activated_renderer_state(g_video.get_current_frame())
-
+                changed_frame = True
             # Frame Seek Bar
             changed, new_idx = imgui.slider_int("Frame", g_video.current_frame_idx, 0, g_video.num_frames - 1)
             if changed:
                 g_video.set_frame(new_idx)
-                update_activated_renderer_state(g_video.get_current_frame())
+                changed_frame = True
+            if changed_frame:
+                gaussians = g_video.get_current_frame_cpu()
+                gaussians_gpu = g_video.get_current_frame_gpu()
+                g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
+                g_renderer.sort_and_update(g_camera) 
 
             # Speed Control
             changed, g_video.playback_speed = imgui.slider_float("Speed", g_video.playback_speed, 0.1, 4.0, "%.1fx")
