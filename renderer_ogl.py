@@ -152,6 +152,14 @@ class OpenGLRenderer(GaussianRenderBase):
 
         self.update_vsync()
 
+        vendor = gl.glGetString(gl.GL_VENDOR)
+        renderer = gl.glGetString(gl.GL_RENDERER)
+        version = gl.glGetString(gl.GL_VERSION)
+
+        print("OpenGL Vendor:", vendor.decode())
+        print("OpenGL Renderer:", renderer.decode())
+        print("OpenGL Version:", version.decode())
+
     def update_vsync(self):
         if wglSwapIntervalEXT is not None:
             wglSwapIntervalEXT(1 if self.reduce_updates else 0)

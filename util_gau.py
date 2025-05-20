@@ -60,7 +60,7 @@ def naive_gaussian():
 
 
 def load_ply(path):
-    max_sh_degree = 3
+    max_sh_degree = 2
     plydata = PlyData.read(path)
     xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                     np.asarray(plydata.elements[0]["y"]),

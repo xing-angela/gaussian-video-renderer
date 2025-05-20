@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Conda environment
+*.conda
+*.env.yml
+
+# Python egg info
+*.egg-info/
+*.egg
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+*.manifest
+*.spec

@@ -9,7 +9,7 @@ import util
 import imageio
 import util_gau
 import tkinter as tk
-from util_uvgs import GaussianVideo
+from video_manager import GaussianVideo
 from tkinter import filedialog
 import sys
 import argparse
@@ -39,6 +39,8 @@ g_show_help_win = True
 g_show_camera_win = False
 g_render_mode_tables = ["Gaussian Ball", "Flat Ball", "Billboard", "Depth", "SH:0", "SH:0~1", "SH:0~2", "SH:0~3 (default)"]
 g_render_mode = 7
+
+g_video_total_memory = 0.0
 
 g_video = GaussianVideo(None, fps=12)
 
@@ -118,7 +120,7 @@ def window_resize_callback(window, width, height):
 
 def main():
     global g_camera, g_renderer, g_renderer_list, g_renderer_idx, g_scale_modifier, g_auto_sort, \
-        g_show_control_win, g_show_help_win, g_show_camera_win, \
+        g_show_control_win, g_show_help_win, g_show_camera_win, g_video_total_memory, \
         g_render_mode, g_render_mode_tables, g_video
         
     imgui.create_context()
@@ -184,7 +186,12 @@ def main():
                 # debug
                 # g_video.prefetch_frames(len(g_video.frames), load_current=False)
 
-                gaussians_gpu = g_video.get_current_frame_gpu()
+                # a) upload current frame to gpu
+                gaussians_gpu = g_video.upload_to_gpu(g_video.current_frame_idx)[0]
+
+                # b) assume cached gpu buffers
+                # gaussians_gpu = g_video.get_current_frame_gpu()
+
                 g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
 
                 g_renderer.sort_and_update(g_camera)
@@ -217,6 +224,7 @@ def main():
                     update_activated_renderer_state(gaussians)
 
                 imgui.text(f"fps = {imgui.get_io().framerate:.1f}")
+                imgui.text(f"mem = {g_video_total_memory:.3f}")
 
                 changed, g_renderer.reduce_updates = imgui.checkbox(
                         "reduce updates", g_renderer.reduce_updates,
@@ -242,12 +250,13 @@ def main():
                         g_video.load_frames(folder_path)
                         print("Loaded " + str(g_video.num_frames) + " frames")
                         assert g_video.num_frames > 0, "Could not load video frames"
-                        print("Total size: " + str(g_video.get_total_frame_memory_gb()) + " GB")
+                        g_video_total_memory = g_video.get_total_frame_memory_gb()
+                        print("Total size: " + str(g_video_total_memory) + " GB")
 
                         # test
-                        frames = [i for i in range(g_video.num_frames)]
-                        print(frames)
-                        g_video.upload_frames_to_gpu(frames)
+                        # frames = [i for i in range(g_video.num_frames)]
+                        # print(frames)
+                        # g_video.upload_frames_to_gpu(frames)
 
                 # camera fov
                 changed, g_camera.fovy = imgui.slider_float(
