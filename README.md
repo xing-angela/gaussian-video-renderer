@@ -1,6 +1,6 @@
 # 4D Gaussian Splatting Video Viewer
 
-This project is a custom video-capable viewer built on top of the excellent [Tiny Gaussian Splatting Viewer]([https://github.com/ashawkey/tiny-gs-viewer](https://github.com/limacv/GaussianSplattingViewer)) by Li Ma. The original viewer supports OpenGL and CUDA backends for static 3D Gaussian splat scenes. Our extension enables interactive playback and exploration of **4D Gaussian splats** (i.e., time-varying sequences).
+This project is a custom video-capable viewer built on top of the excellent [Tiny Gaussian Splatting Viewer](https://github.com/limacv/GaussianSplattingViewer) by Li Ma. The original viewer supports OpenGL and CUDA backends for static 3D Gaussian splat scenes. Our extension enables interactive playback and exploration of **4D Gaussian splats** (i.e., time-varying sequences).
 
 ---
 
