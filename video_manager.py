@@ -9,6 +9,9 @@ from renderer_cuda import gaus_cuda_from_cpu
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
+def searchForMaxIteration(folder):
+    saved_iters = [int(fname.split("_")[-1]) for fname in os.listdir(folder)]
+    return max(saved_iters)
 
 class GaussianVideo:
 
@@ -35,11 +38,17 @@ class GaussianVideo:
             self.flat_cache = []
             return
 
-        frame_files = sorted([
-            os.path.join(folder_path, f)
-            for f in os.listdir(folder_path)
-            if f.endswith('.ply')
-        ])
+        timestamps = sorted(os.listdir(folder_path), key=lambda x: int(os.path.splitext(x)[0].split("_")[1]))
+
+        frame_files = []
+        for timestamp in timestamps:
+            iter = searchForMaxIteration(os.path.join(folder_path, timestamp, "point_cloud"))
+            frame_files.append(os.path.join(folder_path, timestamp, "point_cloud", f"iteration_{iter}", "point_cloud.ply"))
+        # frame_files = sorted([
+        #     os.path.join(folder_path, f)
+        #     for f in os.listdir(folder_path)
+        #     if f.endswith('.ply')
+        # ])
         self.num_frames = len(frame_files)
 
         with ThreadPoolExecutor() as executor:

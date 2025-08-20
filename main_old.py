@@ -9,16 +9,12 @@ import util
 import imageio
 import util_gau
 import tkinter as tk
-# from video_manager import GaussianVideo
-from video_stream_manager import GaussianVideo
-# from video_stream_manager2 import GaussianVideo
+from video_manager import GaussianVideo
 from tkinter import filedialog
 import sys
 import argparse
 from renderer_ogl import OpenGLRenderer, GaussianRenderBase
-from PIL import Image
-import gc
-import torch
+
 
 # Add the directory containing main.py to the Python path
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -46,11 +42,10 @@ g_render_mode = 7
 
 g_video_total_memory = 0.0
 
-# g_video = GaussianVideo(None, fps=12)
-g_video = GaussianVideo(None, fps=30, renderer_type=g_renderer_idx, cache_ahead=5)
+g_video = GaussianVideo(None, fps=30)
 
 def impl_glfw_init():
-    window_name = "Panopticon"
+    window_name = "NeUVF editor"
 
     if not glfw.init():
         print("Could not initialize OpenGL context")
@@ -123,28 +118,11 @@ def window_resize_callback(window, width, height):
     g_camera.update_resolution(height, width)
     g_renderer.set_render_reso(width, height)
 
-def load_texture(path):
-    img = Image.open(path)
-    img_data = img.convert("RGBA").tobytes()
-
-    width, height = img.size
-
-    texture = gl.glGenTextures(1)
-    gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-    # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
-    gl.glTexImage2D(
-        gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, width, height, 0,
-        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, img_data
-    )
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-    return texture
-
 def main():
     global g_camera, g_renderer, g_renderer_list, g_renderer_idx, g_scale_modifier, g_auto_sort, \
         g_show_control_win, g_show_help_win, g_show_camera_win, g_video_total_memory, \
         g_render_mode, g_render_mode_tables, g_video
-
+        
     imgui.create_context()
     if args.hidpi:
         imgui.get_io().font_global_scale = 1.5
@@ -152,11 +130,6 @@ def main():
     impl = GlfwRenderer(window)
     root = tk.Tk()  # used for file dialog
     root.withdraw()
-
-    play_tex = load_texture("assets/play.png")
-    pause_tex = load_texture("assets/pause.png")
-    forward_tex = load_texture("assets/forward.png")
-    upload_tex = load_texture("assets/open_folder.png")
     
     glfw.set_cursor_pos_callback(window, cursor_pos_callback)
     glfw.set_mouse_button_callback(window, mouse_button_callback)
@@ -199,26 +172,29 @@ def main():
         update_camera_pose_lazy()
         update_camera_intrin_lazy()
 
-        # caching
-        if g_video and g_video.num_frames > 0:
+        # currently no future frame caching, copying to gpu every frame
+        if g_video and g_video.frames:
             frame_changed = False
             if not g_video.paused:
-                frame_changed = g_video.update()  # advances index + pokes prefetcher
+                frame_changed = g_video.update() 
+                # print("Frame Changed")
+        
+            if frame_changed:
+                gaussians = g_video.get_current_frame_cpu()
+                # g_renderer.update_gaussian_data(gaussians)
 
-            # Ensure we have a GPU buffer for the *current* frame.
-            # First try non-blocking (keeps drawing previous frame if load not ready yet),
-            # then fall back to a short blocking upload if needed.
-            gaussians_gpu = g_video.get_current_frame_gpu(force_load=False)
-            if gaussians_gpu is None or frame_changed:
-                gaussians_gpu = g_video.get_current_frame_gpu(force_load=True)
+                # debug
+                # g_video.prefetch_frames(len(g_video.frames), load_current=False)
 
-            # CPU GaussianData
-            gaussians_cpu = g_video.get_current_frame_cpu(block=False)
+                # a) upload current frame to gpu
+                gaussians_gpu = g_video.upload_to_gpu(g_video.current_frame_idx)[0]
 
-            if gaussians_cpu is not None and gaussians_gpu is not None:
-                g_renderer.update_preloaded_gaussian_data(gaussians_cpu, metadata=gaussians_gpu)
-                if g_auto_sort or frame_changed:
-                    g_renderer.sort_and_update(g_camera)
+                # b) assume cached gpu buffers
+                # gaussians_gpu = g_video.get_current_frame_gpu()
+
+                g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
+
+                g_renderer.sort_and_update(g_camera)
 
         g_renderer.draw()
 
@@ -248,43 +224,39 @@ def main():
                     update_activated_renderer_state(gaussians)
 
                 imgui.text(f"fps = {imgui.get_io().framerate:.1f}")
-                # imgui.text(f"mem = {g_video_total_memory:.3f}")
+                imgui.text(f"mem = {g_video_total_memory:.3f}")
 
-                # changed, g_renderer.reduce_updates = imgui.checkbox(
-                #         "reduce updates", g_renderer.reduce_updates,
-                #     )
+                changed, g_renderer.reduce_updates = imgui.checkbox(
+                        "reduce updates", g_renderer.reduce_updates,
+                    )
 
-                # imgui.text(f"# of Gaus = {len(gaussians)}")
-                # if imgui.button(label='open ply'):
-                #     file_path = filedialog.askopenfilename(title="open ply",
-                #         initialdir="C:\\Users\\MSI_NB\\Downloads\\viewers",
-                #         filetypes=[('ply file', '.ply')]
-                #         )
-                #     if file_path:
-                #         try:
-                #             gaussians = util_gau.load_ply(file_path)
-                #             g_renderer.update_gaussian_data(gaussians)
-                #             g_renderer.sort_and_update(g_camera)
-                #         except RuntimeError as e:
-                #             pass
+                imgui.text(f"# of Gaus = {len(gaussians)}")
+                if imgui.button(label='open ply'):
+                    file_path = filedialog.askopenfilename(title="open ply",
+                        initialdir="C:\\Users\\MSI_NB\\Downloads\\viewers",
+                        filetypes=[('ply file', '.ply')]
+                        )
+                    if file_path:
+                        try:
+                            gaussians = util_gau.load_ply(file_path)
+                            g_renderer.update_gaussian_data(gaussians)
+                            g_renderer.sort_and_update(g_camera)
+                        except RuntimeError as e:
+                            pass
 
                 if imgui.button(label='open video folder'):
                     folder_path = filedialog.askdirectory(title="Open Gaussian Video Folder")
                     if folder_path:
-                        # Rebuild the video with cache
-                        new_video = GaussianVideo(
-                            folder_path,
-                            fps=12,
-                            renderer_type=g_renderer_idx,
-                            cache_ahead=5,      # tweak as needed
-                            use_memmap=False    # True if frames are huge and disk is fast
-                        )
-                        if g_renderer_idx == BACKEND_OGL:
-                            new_video.set_program(g_renderer_list[BACKEND_OGL].program)
+                        g_video.load_frames(folder_path)
+                        print("Loaded " + str(g_video.num_frames) + " frames")
+                        assert g_video.num_frames > 0, "Could not load video frames"
+                        g_video_total_memory = g_video.get_total_frame_memory_gb()
+                        print("Total size: " + str(g_video_total_memory) + " GB")
 
-                        # swap in
-                        g_video = new_video
-
+                        # test
+                        # frames = [i for i in range(g_video.num_frames)]
+                        # print(frames)
+                        # g_video.upload_frames_to_gpu(frames)
 
                 # camera fov
                 changed, g_camera.fovy = imgui.slider_float(
@@ -311,14 +283,14 @@ def main():
                     g_renderer.set_render_mod(g_render_mode - 4)
                 
                 # sort button
-                # if imgui.button(label='sort Gaussians'):
-                #     g_renderer.sort_and_update(g_camera)
-                # imgui.same_line()
-                # changed, g_auto_sort = imgui.checkbox(
-                #         "auto sort", g_auto_sort,
-                #     )
-                # if g_auto_sort:
-                #     g_renderer.sort_and_update(g_camera)
+                if imgui.button(label='sort Gaussians'):
+                    g_renderer.sort_and_update(g_camera)
+                imgui.same_line()
+                changed, g_auto_sort = imgui.checkbox(
+                        "auto sort", g_auto_sort,
+                    )
+                if g_auto_sort:
+                    g_renderer.sort_and_update(g_camera)
                 
                 if imgui.button(label='save image'):
                     width, height = glfw.get_framebuffer_size(window)
@@ -342,104 +314,88 @@ def main():
                     #     projmat=g_camera.get_project_matrix(),
                     #     hfovxyfocal=g_camera.get_htanfovxy_focal()
                     # )
-
                 imgui.end()
 
-        # place at bottom of main viewport
-        viewport = imgui.get_main_viewport()
-        win_pos = (viewport.pos.x, viewport.pos.y + viewport.size.y - 65)
-        win_size = (viewport.size.x, 65)
+        if g_show_camera_win:
+            if imgui.button(label='rot 180'):
+                g_camera.flip_ground()
 
-        imgui.set_next_window_position(win_pos[0], win_pos[1])
-        imgui.set_next_window_size(win_size[0], win_size[1])
+            changed, g_camera.target_dist = imgui.slider_float(
+                    "t", g_camera.target_dist, 1., 8., "target dist = %.3f"
+                )
+            if changed:
+                g_camera.update_target_distance()
 
-        imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0)
+            changed, g_camera.rot_sensitivity = imgui.slider_float(
+                    "r", g_camera.rot_sensitivity, 0.002, 0.1, "rotate speed = %.3f"
+                )
+            imgui.same_line()
+            if imgui.button(label="reset r"):
+                g_camera.rot_sensitivity = 0.02
 
-        flags = (
-            imgui.WINDOW_NO_TITLE_BAR
-            | imgui.WINDOW_NO_RESIZE
-            | imgui.WINDOW_NO_MOVE
-            | imgui.WINDOW_NO_COLLAPSE
-        )
+            changed, g_camera.trans_sensitivity = imgui.slider_float(
+                    "m", g_camera.trans_sensitivity, 0.001, 0.03, "move speed = %.3f"
+                )
+            imgui.same_line()
+            if imgui.button(label="reset m"):
+                g_camera.trans_sensitivity = 0.01
 
-        if imgui.begin("VideoControlBar", True, flags):
-            if g_video.paused:
-                if imgui.image_button(play_tex, 16, 16):
-                    g_video.toggle_pause()
-            else:
-                if imgui.image_button(pause_tex, 16, 16):
-                    g_video.toggle_pause()
+            changed, g_camera.zoom_sensitivity = imgui.slider_float(
+                    "z", g_camera.zoom_sensitivity, 0.001, 0.05, "zoom speed = %.3f"
+                )
+            imgui.same_line()
+            if imgui.button(label="reset z"):
+                g_camera.zoom_sensitivity = 0.01
+
+            changed, g_camera.roll_sensitivity = imgui.slider_float(
+                    "ro", g_camera.roll_sensitivity, 0.003, 0.1, "roll speed = %.3f"
+                )
+            imgui.same_line()
+            if imgui.button(label="reset ro"):
+                g_camera.roll_sensitivity = 0.03
+
+        if g_show_help_win:
+            imgui.begin("Help", True)
+            imgui.text("Open Gaussian Splatting PLY file \n  by click 'open ply' button")
+            imgui.text("Use left click & move to rotate camera")
+            imgui.text("Use right click & move to translate camera")
+            imgui.text("Press Q/E to roll camera")
+            imgui.text("Use scroll to zoom in/out")
+            imgui.text("Use control panel to change setting")
+            imgui.end()
+
+        if g_video:
+            imgui.separator()
+            imgui.text("Video Controls")
+
+            # Play / Pause Button
+            if imgui.button("Pause" if not g_video.paused else "Resume"):
+                g_video.toggle_pause()
 
             imgui.same_line()
             changed_frame = False
+            if imgui.button("<<"):
+                g_video.step_backward()
+                changed_frame = True
             imgui.same_line()
-            if imgui.image_button(forward_tex, 16, 16):
+            if imgui.button(">>"):
                 g_video.step_forward()
                 changed_frame = True
-
-            imgui.same_line()
-            progress = g_video.current_frame_idx / max(1, g_video.num_frames - 1)
-            bar_width = imgui.get_content_region_available_width() - 100
-            bar_height = 20
-
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 1.0, 1.0, 1.0, 1.0)
-            imgui.progress_bar(progress, size=(bar_width, bar_height))
-            imgui.pop_style_color()
-
-            # if changed:
-            #     g_video.set_frame(new_idx)
-            #     changed_frame = True
+            # Frame Seek Bar
+            changed, new_idx = imgui.slider_int("Frame", g_video.current_frame_idx, 0, g_video.num_frames - 1)
+            if changed:
+                g_video.set_frame(new_idx)
+                changed_frame = True
             if changed_frame:
                 gaussians = g_video.get_current_frame_cpu()
                 gaussians_gpu = g_video.get_current_frame_gpu()
                 g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
                 g_renderer.sort_and_update(g_camera) 
 
-            imgui.same_line()
-            imgui.text(f"{g_video.current_frame_idx}/{g_video.num_frames}")
-
-            imgui.same_line()
-            if imgui.image_button(upload_tex, 16, 16):
-                folder_path = filedialog.askdirectory(title="Open Gaussian Video Folder")
-                if folder_path:
-                    # Rebuild the video with cache
-                    new_video = GaussianVideo(
-                        folder_path,
-                        fps=12,
-                        renderer_type=g_renderer_idx,
-                        cache_ahead=5, 
-                        use_memmap=False 
-                    )
-                    if g_renderer_idx == BACKEND_OGL:
-                        new_video.set_program(g_renderer_list[BACKEND_OGL].program)
-
-                    # swap in
-                    g_video = new_video
-
-
-            for i, mode_name in enumerate(g_render_mode_tables):
-                if i > 0:
-                    imgui.same_line()
-
-                # compute whether this button should be highlighted BEFORE changing g_render_mode
-                is_active = (i == g_render_mode)
-
-                if is_active:
-                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 0.5)  # active green
-
-                if imgui.button(mode_name):
-                    g_render_mode = i
-                    g_renderer.set_render_mod(g_render_mode - 4)
-
-                if is_active:
-                    imgui.pop_style_color()
-
-        imgui.end()
-        imgui.pop_style_var(1)
-
-        # Ensure autosorting for paused video (so there are no artifacts)
-        if g_video.paused:
-            g_renderer.sort_and_update(g_camera)
+            # Speed Control
+            changed, g_video.playback_speed = imgui.slider_float("Speed", g_video.playback_speed, 0.1, 4.0, "%.1fx")
+            if changed:
+                g_video.set_speed(g_video.playback_speed)
         
         imgui.render()
         impl.render(imgui.get_draw_data())
@@ -448,23 +404,10 @@ def main():
     impl.shutdown()
     glfw.terminate()
 
-    # Clean up
-    del g_video
-    del g_renderer
-    del g_renderer_list
-    del g_camera
-    gc.collect()
-    if torch is not None and torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    try:
-        gl.glDeleteTextures([play_tex, pause_tex, forward_tex, upload_tex])
-    except Exception:
-        pass
-
 
 if __name__ == "__main__":
     global args
-    parser = argparse.ArgumentParser(description="Panopticon editor with optional HiDPI support.")
+    parser = argparse.ArgumentParser(description="NeUVF editor with optional HiDPI support.")
     parser.add_argument("--hidpi", action="store_true", help="Enable HiDPI scaling for the interface.")
     args = parser.parse_args()
 

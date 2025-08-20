@@ -11,8 +11,8 @@ from renderer_ogl import GaussianRenderBase
 from dataclasses import dataclass
 from cuda import cudart as cu
 # from gsplat import rasterization
-# from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
+from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+# from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
 
 
 try:
