@@ -1,61 +1,27 @@
 import os
 import re
-import json
 import time
 import threading
 import numpy as np
 import util
 from util_gau import GaussianData
 from renderer_cuda import gaus_cuda_from_cpu
-# from concurrent.futures import ThreadPoolExecutor
-
 
 def _natural_key(s: str):
     return [int(t) if t.isdigit() else t.lower()
             for t in re.findall(r'\d+|\D+', os.path.basename(s))]
 
-def _read_timestamps_index(folder_path, default_bin_dir="bin", index_name="timestamps.idx"):
+def _read_timestamps_index(folder_path, default_bin_dir="bin"):
     """
-    Read the index produced by your converter:
-      {
-        "version": 1,
-        "dtype": "float32",
-        "timestamps": [
-          {"index": i, "path": "bin/000000.bin", "dtype": "float32", "count": N*D},
-          ...
-        ]
-      }
-
-    Returns: (files:list[str], dtype:str, counts:list[int]|None)
+    Gets all .bin files
     """
-    idx_path = os.path.join(folder_path, index_name)
-    if not os.path.isfile(idx_path):
-        # Fallback: list *.bin
-        bin_dir = os.path.join(folder_path, default_bin_dir)
-        if os.path.isdir(bin_dir):
-            files = [os.path.join(bin_dir, f) for f in os.listdir(bin_dir) if f.endswith(".bin")]
-        else:
-            files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith(".bin")]
-        files.sort(key=_natural_key)
-        return files, "float32", None
-
-    with open(idx_path, "r") as f:
-        meta = json.load(f)
-
-    # if meta.get("version", 1) != 1:
-    #     raise RuntimeError(f"Unsupported timestamps.idx version: {meta.get('version')}")
-    dtype = meta.get("dtype", "float32")
-    items = sorted(meta.get("timestamps", []), key=lambda it: it.get("index", 0))
-
-    files, counts = [], []
-    for it in items:
-        p = it.get("path")
-        files.append(p)
-        # full_path = os.path.join(folder_path, p)
-        # files.append(full_path)
-        counts.append(int(it.get("count", 0)) if "count" in it else -1)
-
-    return files, dtype, counts
+    bin_dir = os.path.join(folder_path, default_bin_dir)
+    if os.path.isdir(bin_dir):
+        files = [os.path.join(bin_dir, f) for f in os.listdir(bin_dir) if f.endswith(".bin")]
+    else:
+        files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith(".bin")]
+    files.sort(key=_natural_key)
+    return files, "float32"
 
 
 def _infer_sh_dim_from_file(path, base=11):
@@ -69,13 +35,12 @@ def _infer_sh_dim_from_file(path, base=11):
 
 class _FrameCache:
     """Forward-only (looping) frame cache with background prefetch for .bin frames."""
-    def __init__(self, frame_paths, feature_dim, sh_dim, cache_ahead=5, use_memmap=False):
+    def __init__(self, frame_paths, feature_dim, sh_dim, cache_ahead=5):
         self.paths = frame_paths
         self.N = len(frame_paths)
         self.D = feature_dim
         self.SH = sh_dim
         self.cache_ahead = max(0, cache_ahead)
-        self.use_memmap = use_memmap
 
         # idx -> (GaussianData, flat_array) ; both share memory when possible
         self._have = {}
@@ -100,7 +65,6 @@ class _FrameCache:
             self._cond.notify_all()
         if self._th.is_alive():
             self._th.join(timeout=1.0)
-        # self._executor.shutdown(wait=False)
 
     def set_current_index(self, idx):
         with self._lock:
@@ -178,16 +142,10 @@ class _FrameCache:
     # ---- I/O ----
     def _load_bin_as_gaussian(self, path):
         # Read float32 and reshape to (N, D)
-        if self.use_memmap:
-            mm = np.memmap(path, dtype=np.float32, mode='r')
-            if mm.size % self.D != 0:
-                raise RuntimeError(f"Bad frame size in {path}: total={mm.size}, D={self.D}")
-            arr = np.reshape(mm, (-1, self.D))
-        else:
-            arr = np.fromfile(path, dtype=np.float32)
-            if arr.size % self.D != 0:
-                raise RuntimeError(f"Bad frame size in {path}: total={arr.size}, D={self.D}")
-            arr = arr.reshape((-1, self.D))
+        arr = np.fromfile(path, dtype=np.float32)
+        if arr.size % self.D != 0:
+            raise RuntimeError(f"Bad frame size in {path}: total={arr.size}, D={self.D}")
+        arr = arr.reshape((-1, self.D))
 
         xyz = arr[:, 0:3]
         rot = arr[:, 3:7]
@@ -234,23 +192,23 @@ class GaussianVideo:
         self._cache = None
         self._frame_paths = []
 
-        self._init_frames(cache_ahead=cache_ahead, use_memmap=use_memmap)
+        self._init_frames(cache_ahead=cache_ahead)
 
     # -------------- Setup --------------
-    def _init_frames(self, cache_ahead, use_memmap):
+    def _init_frames(self, cache_ahead):
         if not self.folder_path:
             self.num_frames = 0
             self._frame_paths = []
             self._cache = _FrameCache([], self.feature_dim, self.sh_dim,
-                                    cache_ahead=cache_ahead, use_memmap=use_memmap)
+                                    cache_ahead=cache_ahead)
             return
 
-        files, dtype, counts = _read_timestamps_index(self.folder_path)
+        files, dtype = _read_timestamps_index(self.folder_path)
         if not files:
             self.num_frames = 0
             self._frame_paths = []
             self._cache = _FrameCache([], self.feature_dim, self.sh_dim,
-                                    cache_ahead=cache_ahead, use_memmap=use_memmap)
+                                    cache_ahead=cache_ahead)
             return
 
         if dtype != "float32":
@@ -261,19 +219,11 @@ class GaussianVideo:
         self.sh_dim = sh_dim
         self.feature_dim = 3 + 4 + 3 + 1 + self.sh_dim  # xyz + rot + scale + opacity + sh
 
-        # Sanity: each frame's element count should be divisible by feature_dim
-        if counts is not None and len(counts) == len(files):
-            for i, (c, p) in enumerate(zip(counts, files)):
-                if c > 0 and (c % self.feature_dim) != 0:
-                    raise RuntimeError(
-                        f"Frame {i} has count={c} not divisible by feature_dim={self.feature_dim} ({p})"
-                    )
-
         self._frame_paths = files
         self.num_frames = len(files)
 
         self._cache = _FrameCache(self._frame_paths, self.feature_dim, self.sh_dim,
-                                cache_ahead=cache_ahead, use_memmap=use_memmap)
+                                cache_ahead=cache_ahead)
         self._cache.start(start_idx=0)
 
     # -------------- GPU Uploads --------------
@@ -346,6 +296,7 @@ class GaussianVideo:
         if force_load:
             entry = self.upload_to_gpu(self.current_frame_idx, block=True)
             return entry[0] if entry else None
+        
         # Try to reuse the slot; if not matching, attempt a non-blocking upload
         entry = self.gaussian_cache[self.current_frame_idx % len(self.gaussian_cache)]
         if entry is None or entry[1] != self.current_frame_idx:
@@ -372,12 +323,4 @@ class GaussianVideo:
         self.program = program
 
     def get_total_frame_memory_gb(self):
-        """Approximate memory of cached frames (current + ahead)."""
-        total = 0
-        cache = self._cache
-        if cache is None:
-            return 0.0
-        with cache._lock:
-            for _, (_, flat) in cache._have.items():
-                total += 0 if flat is None else flat.nbytes
-        return total / (1024 ** 3)
+        return 0.0

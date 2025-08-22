@@ -93,13 +93,6 @@ def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree):
             "count": int(n)
         })
 
-    idx = {
-        "dtype": "float32",
-        "timestamps": items
-    }
-    with open(os.path.join(out_dir, "timestamps.idx"), "w") as f:
-        json.dump(idx, f, indent=2) # Added indent for readability
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", required=True, help="Input .ply file base directory")

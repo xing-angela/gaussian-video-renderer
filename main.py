@@ -378,10 +378,9 @@ def main():
                     # video with cache
                     new_video = GaussianVideo(
                         folder_path,
-                        fps=12,
+                        fps=30,
                         renderer_type=g_renderer_idx,
-                        cache_ahead=5, 
-                        use_memmap=False 
+                        cache_ahead=5
                     )
                     if g_renderer_idx == BACKEND_OGL:
                         new_video.set_program(g_renderer_list[BACKEND_OGL].program)
