@@ -42,6 +42,7 @@ g_show_control_win = True
 g_show_help_win = True
 g_show_camera_win = False
 g_render_mode_tables = ["Gaussian Ball", "Flat Ball", "Billboard", "Depth", "SH:0", "SH:0~1", "SH:0~2", "SH:0~3 (default)"]
+g_render_mode_tables_sub = {"Gaussian Ball": 0, "Depth": 3, "SH:0~3 (default)": 7}
 g_render_mode = 7
 
 g_video_total_memory = 0.0
@@ -228,12 +229,12 @@ def main():
                 clicked, g_show_control_win = imgui.menu_item(
                     "Show Control", None, g_show_control_win
                 )
-                clicked, g_show_help_win = imgui.menu_item(
-                    "Show Help", None, g_show_help_win
-                )
-                clicked, g_show_camera_win = imgui.menu_item(
-                    "Show Camera Control", None, g_show_camera_win
-                )
+                # clicked, g_show_help_win = imgui.menu_item(
+                #     "Show Help", None, g_show_help_win
+                # )
+                # clicked, g_show_camera_win = imgui.menu_item(
+                #     "Show Camera Control", None, g_show_camera_win
+                # )
                 imgui.end_menu()
             imgui.end_main_menu_bar()
         
@@ -250,9 +251,9 @@ def main():
                 imgui.text(f"fps = {imgui.get_io().framerate:.1f}")
                 # imgui.text(f"mem = {g_video_total_memory:.3f}")
 
-                # changed, g_renderer.reduce_updates = imgui.checkbox(
-                #         "reduce updates", g_renderer.reduce_updates,
-                #     )
+                changed, g_renderer.reduce_updates = imgui.checkbox(
+                        "reduce updates", g_renderer.reduce_updates,
+                    )
 
                 # imgui.text(f"# of Gaus = {len(gaussians)}")
                 # if imgui.button(label='open ply'):
@@ -267,37 +268,6 @@ def main():
                 #             g_renderer.sort_and_update(g_camera)
                 #         except RuntimeError as e:
                 #             pass
-
-                if imgui.button(label='open video folder'):
-                    folder_path = filedialog.askdirectory(title="Open Gaussian Video Folder")
-                    if folder_path:
-                        # Rebuild the video with cache
-                        new_video = GaussianVideo(
-                            folder_path,
-                            fps=12,
-                            renderer_type=g_renderer_idx,
-                            cache_ahead=5,
-                            use_memmap=False
-                        )
-
-                        if g_renderer_idx == BACKEND_OGL:
-                            new_video.set_program(g_renderer_list[BACKEND_OGL].program)
-
-                        # wait for background thread to finish loading first frame
-                        first_frame_cpu = new_video.get_current_frame_cpu(block=True)
-                        if first_frame_cpu is not None:
-                            new_video.upload_to_gpu(0, block=True)
-
-                        # swap in
-                        g_video = new_video
-
-
-                # camera fov
-                changed, g_camera.fovy = imgui.slider_float(
-                    "fov", g_camera.fovy, 0.001, np.pi - 0.001, "fov = %.3f"
-                )
-                g_camera.is_intrin_dirty = changed
-                update_camera_intrin_lazy()
                 
                 # scale modifier
                 changed, g_scale_modifier = imgui.slider_float(
@@ -316,7 +286,7 @@ def main():
                 if changed:
                     g_renderer.set_render_mod(g_render_mode - 4)
                 
-                # sort button
+                # # sort button
                 # if imgui.button(label='sort Gaussians'):
                 #     g_renderer.sort_and_update(g_camera)
                 # imgui.same_line()
@@ -369,6 +339,8 @@ def main():
         )
 
         if imgui.begin("VideoControlBar", True, flags):
+            
+            # play/pause buttons
             if g_video.paused:
                 if imgui.image_button(play_tex, 16, 16):
                     g_video.toggle_pause()
@@ -378,37 +350,32 @@ def main():
 
             imgui.same_line()
             changed_frame = False
+
+            # forward button
             imgui.same_line()
             if imgui.image_button(forward_tex, 16, 16):
-                g_video.step_forward()
-                changed_frame = True
+                if g_video.paused:
+                    g_video.step_forward()
+                    changed_frame = True
 
+            # progress bar
             imgui.same_line()
             progress = g_video.current_frame_idx / max(1, g_video.num_frames - 1)
             bar_width = imgui.get_content_region_available_width() - 100
             bar_height = 20
-
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 1.0, 1.0, 1.0, 1.0)
             imgui.progress_bar(progress, size=(bar_width, bar_height))
             imgui.pop_style_color()
 
-            # if changed:
-            #     g_video.set_frame(new_idx)
-            #     changed_frame = True
-            if changed_frame:
-                gaussians = g_video.get_current_frame_cpu()
-                gaussians_gpu = g_video.get_current_frame_gpu()
-                g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
-                g_renderer.sort_and_update(g_camera) 
-
             imgui.same_line()
             imgui.text(f"{g_video.current_frame_idx}/{g_video.num_frames}")
-
+            
+            # upload button
             imgui.same_line()
             if imgui.image_button(upload_tex, 16, 16):
                 folder_path = filedialog.askdirectory(title="Open Gaussian Video Folder")
                 if folder_path:
-                    # Rebuild the video with cache
+                    # video with cache
                     new_video = GaussianVideo(
                         folder_path,
                         fps=12,
@@ -422,12 +389,12 @@ def main():
                     # swap in
                     g_video = new_video
 
-
-            for i, mode_name in enumerate(g_render_mode_tables):
+            # render mode buttons
+            for mode_name in g_render_mode_tables_sub.keys():
+                i = g_render_mode_tables_sub[mode_name]
                 if i > 0:
                     imgui.same_line()
 
-                # compute whether this button should be highlighted BEFORE changing g_render_mode
                 is_active = (i == g_render_mode)
 
                 if is_active:
@@ -440,10 +407,26 @@ def main():
                 if is_active:
                     imgui.pop_style_color()
 
+            # camera fov
+            imgui.same_line()
+            imgui.set_next_item_width(200)
+            changed, g_camera.fovy = imgui.slider_float(
+                "", g_camera.fovy, 0.001, np.pi - 0.001, "fov = %.3f",
+            )
+            g_camera.is_intrin_dirty = changed
+            update_camera_intrin_lazy()
+
+            # update gaussian data
+            if changed_frame:
+                gaussians = g_video.get_current_frame_cpu()
+                gaussians_gpu = g_video.get_current_frame_gpu()
+                g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
+                g_renderer.sort_and_update(g_camera) 
+
         imgui.end()
         imgui.pop_style_var(1)
 
-        # Ensure autosorting for paused video (so there are no artifacts)
+        # Ensure autosorting for paused video
         if g_video.paused:
             g_renderer.sort_and_update(g_camera)
         
