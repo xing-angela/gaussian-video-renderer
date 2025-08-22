@@ -276,11 +276,17 @@ def main():
                             folder_path,
                             fps=12,
                             renderer_type=g_renderer_idx,
-                            cache_ahead=5,      # tweak as needed
-                            use_memmap=False    # True if frames are huge and disk is fast
+                            cache_ahead=5,
+                            use_memmap=False
                         )
+
                         if g_renderer_idx == BACKEND_OGL:
                             new_video.set_program(g_renderer_list[BACKEND_OGL].program)
+
+                        # wait for background thread to finish loading first frame
+                        first_frame_cpu = new_video.get_current_frame_cpu(block=True)
+                        if first_frame_cpu is not None:
+                            new_video.upload_to_gpu(0, block=True)
 
                         # swap in
                         g_video = new_video

@@ -343,7 +343,9 @@ class GaussianVideo:
     def get_current_frame_gpu(self, force_load=False):
         if self.num_frames == 0:
             return None
-
+        if force_load:
+            entry = self.upload_to_gpu(self.current_frame_idx, block=True)
+            return entry[0] if entry else None
         # Try to reuse the slot; if not matching, attempt a non-blocking upload
         entry = self.gaussian_cache[self.current_frame_idx % len(self.gaussian_cache)]
         if entry is None or entry[1] != self.current_frame_idx:
