@@ -23,7 +23,7 @@ def load_ply(path, max_sh_degree=2):
 
     extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
     extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
-    print(extra_f_names)
+    # print(extra_f_names)
     assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
     features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
     for idx, attr_name in enumerate(extra_f_names):
