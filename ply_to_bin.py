@@ -63,8 +63,9 @@ def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree):
     items = []
 
     for i, ply_path in enumerate(tqdm(ply_files, desc="Converting PLY→BIN")):
-        gaus = util_gau.load_ply(ply_path, max_sh_degree)
-        flat = util_gau.GaussianData.flat(gaus)
+        # gaus = util_gau.load_ply(ply_path, max_sh_degree)
+        flat = load_ply(ply_path, max_sh_degree)
+        # flat = util_gau.GaussianData.flat(gaus)
         
         # flat = load_ply(ply_path, max_sh_degree) 
         assert flat.dtype == np.float32 and flat.flags['C_CONTIGUOUS']
@@ -98,7 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--src", required=True, help="Input .ply file base directory")
     parser.add_argument("--outdir", required=True, help="Output .bin file base directory")
     parser.add_argument("--start", type=int, default=0, help="Start index")
-    parser.add_argument("--max_sh_degree", type=int, default=2, help="Max SH degree")
+    parser.add_argument("--max_sh_degree", type=int, default=1, help="Max SH degree")
     args = parser.parse_args()
 
     timestamps = sorted(os.listdir(args.src), key=lambda x: int(os.path.splitext(x)[0].split("_")[1]))
