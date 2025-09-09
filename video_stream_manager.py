@@ -21,6 +21,8 @@ def _read_timestamps_index(folder_path, default_bin_dir="bin"):
     else:
         files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith(".bin")]
     files.sort(key=_natural_key)
+    # in the files list, skip every other file
+    # files = files[::2]
     return files, "float32"
 
 
@@ -34,7 +36,7 @@ def _infer_sh_dim_from_file(path, base=11):
             return dim
 
 class _FrameCache:
-    """Forward-only (looping) frame cache with background prefetch for .bin frames."""
+    """Frame cache with background prefetch for .bin frames."""
     def __init__(self, frame_paths, feature_dim, sh_dim, cache_ahead=5):
         self.paths = frame_paths
         self.N = len(frame_paths)
@@ -142,7 +144,9 @@ class _FrameCache:
     # ---- I/O ----
     def _load_bin_as_gaussian(self, path):
         # Read float32 and reshape to (N, D)
+        t1 = time.perf_counter()
         arr = np.fromfile(path, dtype=np.float32)
+        # print(f"file read: {(time.perf_counter() - t1) * 1e3} ms")
         if arr.size % self.D != 0:
             raise RuntimeError(f"Bad frame size in {path}: total={arr.size}, D={self.D}")
         arr = arr.reshape((-1, self.D))
@@ -153,8 +157,9 @@ class _FrameCache:
         opacity = arr[:, 10:11]
         sh = arr[:, 11:11 + self.SH]
         g = GaussianData(xyz=xyz, rot=rot, scale=scale, opacity=opacity, sh=sh)
+        # print(f"full funtion: {(time.time() - start_time) * 1e3} ms")
+        # print(f"# gaussians: {len(g.xyz)}")
 
-        arr = np.ascontiguousarray(arr, dtype=np.float32)
         return g, arr
 
 
@@ -178,7 +183,7 @@ class GaussianVideo:
         self.frame_step_size = 1
 
         # GPU-side small ring of uploaded buffers (id, frame_idx)
-        self.gaussian_cache = np.array([None] * 15, dtype=object)
+        self.gaussian_cache = np.array([None] * 90, dtype=object)
 
         # Disk frames
         self.folder_path = folder_path
@@ -242,17 +247,19 @@ class GaussianVideo:
         gpu_data = None
 
         if self.renderer_type == 0:
-            # OpenGL: need a flat (N, D) buffer
             flat = self._cache.get_flat(idx, block=block, timeout=0.25 if block else 0.0)
             if flat is None:
-                # Not ready yet -> keep previous GPU buffer (caller can continue drawing old frame)
+                # keep previous GPU buffer
                 return prev_entry
 
-            assert self.program is not None, "OpenGL program not set"
             buffer_id = prev_entry[0] if prev_entry else None
+
+            t1 = time.perf_counter()
             buffer_id = util.set_storage_buffer_data(
                 self.program, "gaussian_data", flat, bind_idx=0, buffer_id=buffer_id
             )
+            t2 = time.perf_counter()
+            # print(f"upload time for frame {idx}: {(t2 - t1) * 1e3} ms")
             gpu_data = buffer_id
 
         elif self.renderer_type == 1:
@@ -260,20 +267,22 @@ class GaussianVideo:
             gaus = self._cache.get_gaussian(idx, block=block, timeout=0.25 if block else 0.0)
             if gaus is None:
                 return prev_entry
+
             gpu_data = gaus_cuda_from_cpu(gaus)
 
         self.gaussian_cache[cache_idx] = (gpu_data, idx)
         return self.gaussian_cache[cache_idx]
 
+
     def upload_frames_to_gpu(self, indices):
         if len(indices) > len(self.gaussian_cache):
-            print("Cannot cache all gaussian frames at once; will overwrite ring slots.")
+            print("Cannot cache all gaussian frames.")
         for idx in indices:
             self.upload_to_gpu(idx, block=False)
 
     # -------------- Playback --------------
     def update(self):
-        """Advance to the next frame if enough time has passed. Returns True if frame index changed."""
+        """Advance to the next frame if enough time has passed."""
         if self.num_frames == 0 or self.paused:
             return False
         now = time.time()
@@ -297,7 +306,7 @@ class GaussianVideo:
             entry = self.upload_to_gpu(self.current_frame_idx, block=True)
             return entry[0] if entry else None
         
-        # Try to reuse the slot; if not matching, attempt a non-blocking upload
+        # try to reuse cached slot
         entry = self.gaussian_cache[self.current_frame_idx % len(self.gaussian_cache)]
         if entry is None or entry[1] != self.current_frame_idx:
             entry = self.upload_to_gpu(self.current_frame_idx, block=False)

@@ -10,7 +10,7 @@ class Camera:
         self.zfar = 100
         self.h = h
         self.w = w
-        self.fovy = np.pi / 2
+        self.fovy = 1# np.pi / 2
         self.position = np.array([0.0, 0.0, 3.0]).astype(np.float32)
         self.target = np.array([0.0, 0.0, 0.0]).astype(np.float32)
         self.up = np.array([0.0, -1.0, 0.0]).astype(np.float32)
@@ -134,7 +134,6 @@ class Camera:
         self.h = max(height, 1)
         self.w = max(width, 1)
         self.is_intrin_dirty = True
-
 
 def load_shaders(vs, fs):
     vertex_shader = open(vs, 'r').read()        
