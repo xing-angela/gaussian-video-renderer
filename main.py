@@ -11,7 +11,6 @@ import util_gau
 import tkinter as tk
 # from video_manager import GaussianVideo
 from video_stream_manager import GaussianVideo
-# from video_stream_manager2 import GaussianVideo
 from tkinter import filedialog
 import sys
 import argparse
@@ -41,11 +40,17 @@ g_auto_sort = False
 g_show_control_win = True
 g_show_help_win = True
 g_show_camera_win = False
+g_show_edit_win = True
 g_render_mode_tables = ["Gaussian Ball", "Flat Ball", "Billboard", "Depth", "SH:0", "SH:0~1", "SH:0~2", "SH:0~3 (default)"]
 g_render_mode_tables_sub = {"Gaussian Ball": 0, "Depth": 3, "SH:0~3 (default)": 7}
 g_render_mode = 7
 
-g_video_total_memory = 0.0
+g_video_total_memory = 0.0\
+
+# Sphere culling parameters
+g_sphere_culling = False
+g_sphere_center = np.array([0.0, 0.0, 0.0])
+g_sphere_radius = 2.0
 
 # g_video = GaussianVideo(None, fps=12)
 g_video = GaussianVideo(None, fps=30, renderer_type=g_renderer_idx, cache_ahead=5)
@@ -144,7 +149,7 @@ def load_texture(path):
 def main():
     global g_camera, g_renderer, g_renderer_list, g_renderer_idx, g_scale_modifier, g_auto_sort, \
         g_show_control_win, g_show_help_win, g_show_camera_win, g_video_total_memory, \
-        g_render_mode, g_render_mode_tables, g_video
+        g_render_mode, g_render_mode_tables, g_video, g_sphere_culling, g_sphere_center, g_sphere_radius
 
     imgui.create_context()
     if args.hidpi:
@@ -206,19 +211,23 @@ def main():
             if not g_video.paused:
                 frame_changed = g_video.update()  # advances index + pokes prefetcher
 
-            # Ensure we have a GPU buffer for the *current* frame.
-            # First try non-blocking (keeps drawing previous frame if load not ready yet),
-            # then fall back to a short blocking upload if needed.
-            gaussians_gpu = g_video.get_current_frame_gpu(force_load=False)
-            if gaussians_gpu is None or frame_changed:
-                gaussians_gpu = g_video.get_current_frame_gpu(force_load=True)
+            if frame_changed:
+                # Ensure we have a GPU buffer for the current frame.
+                # First try non-blocking (keeps drawing previous frame if load not ready yet),
+                # then fall back to a short blocking upload if needed.
+                gaussians_gpu = g_video.get_current_frame_gpu(force_load=False)
+                if gaussians_gpu is None or frame_changed:
+                    gaussians_gpu = g_video.get_current_frame_gpu(force_load=True)
 
-            # CPU GaussianData
-            gaussians_cpu = g_video.get_current_frame_cpu(block=False)
+                # CPU GaussianData
+                gaussians_cpu = g_video.get_current_frame_cpu(block=False)
 
-            if gaussians_cpu is not None and gaussians_gpu is not None:
-                g_renderer.update_preloaded_gaussian_data(gaussians_cpu, metadata=gaussians_gpu)
-                if g_auto_sort or frame_changed:
+                if gaussians_cpu is not None and gaussians_gpu is not None:
+                    g_renderer.update_preloaded_gaussian_data(gaussians_cpu, metadata=gaussians_gpu)
+                    # if g_auto_sort or frame_changed:
+                    #     g_renderer.sort_and_update(g_camera)
+
+                    # g_renderer.update_preloaded_gaussian_data(gaussians, metadata=gaussians_gpu)
                     g_renderer.sort_and_update(g_camera)
 
         g_renderer.draw()
@@ -229,12 +238,6 @@ def main():
                 clicked, g_show_control_win = imgui.menu_item(
                     "Show Control", None, g_show_control_win
                 )
-                # clicked, g_show_help_win = imgui.menu_item(
-                #     "Show Help", None, g_show_help_win
-                # )
-                # clicked, g_show_camera_win = imgui.menu_item(
-                #     "Show Camera Control", None, g_show_camera_win
-                # )
                 imgui.end_menu()
             imgui.end_main_menu_bar()
         
@@ -251,9 +254,9 @@ def main():
                 imgui.text(f"fps = {imgui.get_io().framerate:.1f}")
                 # imgui.text(f"mem = {g_video_total_memory:.3f}")
 
-                changed, g_renderer.reduce_updates = imgui.checkbox(
-                        "reduce updates", g_renderer.reduce_updates,
-                    )
+                # changed, g_renderer.reduce_updates = imgui.checkbox(
+                #         "reduce updates", g_renderer.reduce_updates,
+                #     )
 
                 # imgui.text(f"# of Gaus = {len(gaussians)}")
                 # if imgui.button(label='open ply'):
@@ -321,6 +324,30 @@ def main():
 
                 imgui.end()
 
+        if g_show_edit_win:
+            if imgui.begin("Editing", True):
+                changed_enabled, g_sphere_culling = imgui.checkbox("Sphere Culling", g_sphere_culling)
+                
+                changed_center = False
+                changed_radius = False
+                if g_sphere_culling:
+                    changed_center, g_sphere_center = imgui.slider_float3(
+                        "Center", *g_sphere_center, min_value=-5.0, max_value=5.0
+                    )
+                    changed_radius, g_sphere_radius = imgui.slider_float(
+                        "Radius", g_sphere_radius, min_value=0.1, max_value=5.0
+                    )
+
+                # If any culling parameter changed, update the renderer
+                if changed_enabled or changed_radius or changed_center:
+                    g_renderer.set_sphere_culling(
+                        g_sphere_center, 
+                        g_sphere_radius, 
+                        g_sphere_culling
+                    )
+
+            imgui.end()
+        
         # place at bottom of main viewport
         viewport = imgui.get_main_viewport()
         win_pos = (viewport.pos.x, viewport.pos.y + viewport.size.y - 65)
@@ -380,7 +407,7 @@ def main():
                         folder_path,
                         fps=30,
                         renderer_type=g_renderer_idx,
-                        cache_ahead=5
+                        cache_ahead=10
                     )
                     if g_renderer_idx == BACKEND_OGL:
                         new_video.set_program(g_renderer_list[BACKEND_OGL].program)
@@ -425,7 +452,7 @@ def main():
         imgui.end()
         imgui.pop_style_var(1)
 
-        # Ensure autosorting for paused video
+        # ensure autosorting for paused video
         if g_video.paused:
             g_renderer.sort_and_update(g_camera)
         
@@ -436,7 +463,7 @@ def main():
     impl.shutdown()
     glfw.terminate()
 
-    # Clean up
+    # clean up
     del g_video
     del g_renderer
     del g_renderer_list

@@ -52,6 +52,11 @@ uniform int sh_dim;
 uniform float scale_modifier;
 uniform int render_mod;  // > 0 render 0-ith SH dim, -1 depth, -2 bill board, -3 gaussian
 
+// Sphere culling
+uniform bool u_culling_enabled;
+uniform vec3 u_sphere_center;
+uniform float u_sphere_radius_sq;
+
 out vec3 color;
 out float alpha;
 out vec3 conic;
@@ -120,6 +125,22 @@ void main()
 	int boxid = gi[gl_InstanceID];
 	int total_dim = 3 + 4 + 3 + 1 + sh_dim;
 	int start = boxid * total_dim;
+
+	// Sphere culling logic
+	vec3 g_pos_world = get_vec3(start + POS_IDX);
+	if (u_culling_enabled) {
+	    // Sphere center to Gaussian center
+	    vec3 diff = g_pos_world - u_sphere_center;
+	    float dist_sq = dot(diff, diff);
+	    
+	    // If the distance is greater than the radius, cull this instance
+	    if (dist_sq > u_sphere_radius_sq) {
+	        // Move the quad outside the visible clip space to discard it
+	        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+	        return;
+	    }
+	}
+
 	vec4 g_pos = vec4(get_vec3(start + POS_IDX), 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
     vec4 g_pos_screen = projection_matrix * g_pos_view;

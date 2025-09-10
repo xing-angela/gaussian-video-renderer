@@ -160,6 +160,11 @@ class OpenGLRenderer(GaussianRenderBase):
         print("OpenGL Renderer:", renderer.decode())
         print("OpenGL Version:", version.decode())
 
+        # sphere culling
+        self.culling_enabled = False
+        self.sphere_center = np.array([0.0, 0.0, 0.0])
+        self.culling_radius = 2.0**2
+
     def update_vsync(self):
         if wglSwapIntervalEXT is not None:
             wglSwapIntervalEXT(1 if self.reduce_updates else 0)
@@ -214,8 +219,69 @@ class OpenGLRenderer(GaussianRenderBase):
         util.set_uniform_mat4(self.program, proj_mat, "projection_matrix")
         util.set_uniform_v3(self.program, camera.get_htanfovxy_focal(), "hfovxy_focal")
 
+    def set_sphere_culling(self, center: np.ndarray, radius: float, enabled: bool):
+        self.culling_enabled = enabled
+        self.sphere_center = center
+        self.culling_radius = radius**2
+
     def draw(self):
         gl.glUseProgram(self.program)
+
+        # sphere culling
+        util.set_uniform_1int(self.program, int(self.culling_enabled), "u_culling_enabled")
+        if self.culling_enabled:
+            util.set_uniform_v3(self.program, self.sphere_center, "u_sphere_center")
+            util.set_uniform_1f(self.program, self.culling_radius, "u_sphere_radius_sq")
+
         gl.glBindVertexArray(self.vao)
         num_gau = len(self.gaussians)
         gl.glDrawElementsInstanced(gl.GL_TRIANGLES, len(self.quad_f.reshape(-1)), gl.GL_UNSIGNED_INT, None, num_gau)
+
+
+def create_sphere_vertices(radius, rings, sectors):
+    """
+    Generates vertices for a wireframe sphere.
+    This corrected version builds a list of line-segment endpoints.
+    """
+    lines = []
+    # Generate horizontal lines (circles of latitude)
+    for i in range(rings + 1):
+        phi = np.pi * i / rings
+        for j in range(sectors):
+            theta1 = 2 * np.pi * j / sectors
+            theta2 = 2 * np.pi * (j + 1) / sectors
+
+            # Vertex 1 of the line segment
+            x1 = radius * np.sin(phi) * np.cos(theta1)
+            y1 = radius * np.cos(phi)
+            z1 = radius * np.sin(phi) * np.sin(theta1)
+            
+            # Vertex 2 of the line segment
+            x2 = radius * np.sin(phi) * np.cos(theta2)
+            y2 = radius * np.cos(phi)
+            z2 = radius * np.sin(phi) * np.sin(theta2)
+            
+            lines.append([x1, y1, z1])
+            lines.append([x2, y2, z2])
+
+    # Generate vertical lines (lines of longitude)
+    for j in range(sectors + 1):
+        theta = 2 * np.pi * j / sectors
+        for i in range(rings):
+            phi1 = np.pi * i / rings
+            phi2 = np.pi * (i + 1) / rings
+            
+            # Vertex 1 of the line segment
+            x1 = radius * np.sin(phi1) * np.cos(theta)
+            y1 = radius * np.cos(phi1)
+            z1 = radius * np.sin(phi1) * np.sin(theta)
+
+            # Vertex 2 of the line segment
+            x2 = radius * np.sin(phi2) * np.cos(theta)
+            y2 = radius * np.cos(phi2)
+            z2 = radius * np.sin(phi2) * np.sin(theta)
+
+            lines.append([x1, y1, z1])
+            lines.append([x2, y2, z2])
+            
+    return np.array(lines, dtype=np.float32)
