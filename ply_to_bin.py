@@ -23,7 +23,7 @@ def load_ply(path, max_sh_degree=2):
 
     extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
     extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
-    print(extra_f_names)
+    # print(extra_f_names)
     assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
     features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
     for idx, attr_name in enumerate(extra_f_names):
@@ -63,8 +63,9 @@ def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree):
     items = []
 
     for i, ply_path in enumerate(tqdm(ply_files, desc="Converting PLY→BIN")):
-        gaus = util_gau.load_ply(ply_path, max_sh_degree)
-        flat = util_gau.GaussianData.flat(gaus)
+        # gaus = util_gau.load_ply(ply_path, max_sh_degree)
+        flat = load_ply(ply_path, max_sh_degree)
+        # flat = util_gau.GaussianData.flat(gaus)
         
         # flat = load_ply(ply_path, max_sh_degree) 
         assert flat.dtype == np.float32 and flat.flags['C_CONTIGUOUS']
@@ -98,7 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--src", required=True, help="Input .ply file base directory")
     parser.add_argument("--outdir", required=True, help="Output .bin file base directory")
     parser.add_argument("--start", type=int, default=0, help="Start index")
-    parser.add_argument("--max_sh_degree", type=int, default=2, help="Max SH degree")
+    parser.add_argument("--max_sh_degree", type=int, default=1, help="Max SH degree")
     args = parser.parse_args()
 
     timestamps = sorted(os.listdir(args.src), key=lambda x: int(os.path.splitext(x)[0].split("_")[1]))
