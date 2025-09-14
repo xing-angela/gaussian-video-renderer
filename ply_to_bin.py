@@ -58,7 +58,7 @@ def load_ply(path, max_sh_degree=2):
     ret = np.concatenate([xyz, rots, scales, opacities, shs], axis=-1)
     return np.ascontiguousarray(ret)
 
-def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree):
+def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree, bin_subdir = "bin"):
     os.makedirs(out_dir, exist_ok=True)
     items = []
 
@@ -73,9 +73,6 @@ def convert_folder(ply_files, avail_timestamps, out_dir, max_sh_degree):
 
         timestamp = avail_timestamps[i]
         bin_name = f"{timestamp:06d}.bin"
-        
-        # subdir
-        bin_subdir = "bin"
 
         # Full path for file writing
         bin_dir_full = os.path.join(out_dir, bin_subdir)
@@ -100,6 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--outdir", required=True, help="Output .bin file base directory")
     parser.add_argument("--start", type=int, default=0, help="Start index")
     parser.add_argument("--max_sh_degree", type=int, default=1, help="Max SH degree")
+    parser.add_argument("--bin_subdir", type=str, default="bin", help="Binary subdirectory")
     args = parser.parse_args()
 
     timestamps = sorted(os.listdir(args.src), key=lambda x: int(os.path.splitext(x)[0].split("_")[1]))
@@ -114,10 +112,15 @@ if __name__ == "__main__":
         if not os.path.exists(os.path.join(args.src, timestamp, "point_cloud")):
             print("Skipping", timestamp)
             continue
+        
+        bin_name = f"{idx:06d}.bin"
+        if os.path.exists(os.path.join(args.outdir, args.bin_subdir, bin_name)):
+            print("Already exists, skipping", bin_name)
+            continue
 
         iteration = searchForMaxIteration(os.path.join(args.src, timestamp, "point_cloud"))
         ply_path = os.path.join(args.src, timestamp, "point_cloud", f"iteration_{iteration}", "point_cloud.ply")
         ply_files.append(ply_path)
         avail_timestamps.append(idx)
 
-    convert_folder(ply_files, avail_timestamps, args.outdir, args.max_sh_degree)
+    convert_folder(ply_files, avail_timestamps, args.outdir, args.max_sh_degree, args.bin_subdir)
