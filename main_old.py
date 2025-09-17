@@ -226,9 +226,9 @@ def main():
                 imgui.text(f"fps = {imgui.get_io().framerate:.1f}")
                 imgui.text(f"mem = {g_video_total_memory:.3f}")
 
-                changed, g_renderer.reduce_updates = imgui.checkbox(
-                        "reduce updates", g_renderer.reduce_updates,
-                    )
+                # changed, g_renderer.reduce_updates = imgui.checkbox(
+                #         "reduce updates", g_renderer.reduce_updates,
+                #     )
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):

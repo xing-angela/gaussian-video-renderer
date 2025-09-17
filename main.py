@@ -405,7 +405,7 @@ def main():
                     # video with cache
                     new_video = GaussianVideo(
                         folder_path,
-                        fps=30,
+                        fps=12,
                         renderer_type=g_renderer_idx,
                         cache_ahead=10
                     )
